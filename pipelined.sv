@@ -1,13 +1,13 @@
 `timescale 1ns / 1ps
 
-module top2(input         clk, reset, 
-           output  [31:0] WriteDataM, DataAdrM, 
+module top2(input         clk, reset,
+           output  [31:0] WriteDataM, DataAdrM,
            output         MemWriteM);
 
   wire [31:0] PCF, InstrF, ReadDataM;
-  
-  
-  riscv riscv(clk, reset, PCF, InstrF, MemWriteM, DataAdrM, 
+
+
+  riscv riscv(clk, reset, PCF, InstrF, MemWriteM, DataAdrM,
               WriteDataM, ReadDataM);
   imem imem(PCF, InstrF);
   dmem dmem(clk, MemWriteM, DataAdrM, WriteDataM, ReadDataM);
@@ -35,48 +35,50 @@ module riscv(input          clk, reset,
   wire		  PCTargetSrcE;
   wire [1:0]  ForwardAE, ForwardBE;
   wire        StallF, StallD, FlushD, FlushE;
+  wire        ResultSrcMb1;
 
   wire [4:0] Rs1D, Rs2D, Rs1E, Rs2E, RdE, RdM, RdW;
-  
+
   controller c(clk, reset,
                opD, funct3D, funct7b5D,funct7b0D, ImmSrcD,
                FlushE, ZeroE, PCSrcE, ALUControlE, ALUSrcE, ResultSrcEb0,
-               MemWriteM, RegWriteM, 
-			   RegWriteW, ResultSrcW,PCTargetSrcE);
+               MemWriteM, RegWriteM,
+			   RegWriteW, ResultSrcW,PCTargetSrcE, ResultSrcMb1);
 
   datapath dp(clk, reset,
               StallF, PCF, InstrF,
 			  opD, funct3D, funct7b5D,funct7b0D, StallD, FlushD, ImmSrcD,
 			  PCTargetSrcE, FlushE, ForwardAE, ForwardBE, PCSrcE, ALUControlE, ALUSrcE, ZeroE,funct3E,
               MemWriteM, WriteDataM, ALUResultM, ReadDataM,
-              RegWriteW, ResultSrcW,
+              RegWriteW, ResultSrcW, ResultSrcMb1,
               Rs1D, Rs2D, Rs1E, Rs2E, RdE, RdM, RdW);
 
   hazard  hu(Rs1D, Rs2D, Rs1E, Rs2E, RdE, RdM, RdW,
              PCSrcE, ResultSrcEb0, RegWriteM, RegWriteW,
-             ForwardAE, ForwardBE, StallF, StallD, FlushD, FlushE);			 
+             ForwardAE, ForwardBE, StallF, StallD, FlushD, FlushE);
 endmodule
 
 
 module controller(input  		  clk, reset,
-                  
+
                   input  [6:0]  opD,
                   input  [2:0]  funct3D,
                   input  	     funct7b5D,
                   input			 funct7b0D,
                   output  [2:0] ImmSrcD,
-                  
-                  input  	     FlushE, 
-                  input  	     ZeroE, 
+
+                  input  	     FlushE,
+                  input  	     ZeroE,
                   output        PCSrcE,
-                  output  [3:0] ALUControlE, 
+                  output  [3:0] ALUControlE,
                   output  	     ALUSrcE,
                   output        ResultSrcEb0,
                   output  	     MemWriteM,
-                  output        RegWriteM,   				  
+                  output        RegWriteM,
                   output  	     RegWriteW,
                   output  [1:0] ResultSrcW,
-						output PCTargetSrcE);
+						output PCTargetSrcE,
+						output ResultSrcMb1);
 
   wire 	  RegWriteD, RegWriteE;
   wire [1:0] ResultSrcD, ResultSrcE, ResultSrcM;
@@ -86,28 +88,29 @@ module controller(input  		  clk, reset,
   wire	[1:0] ALUOpD;
   wire [3:0] ALUControlD;
   wire 	  ALUSrcD;
-  wire PCTargetSrcD;	
-  
+  wire PCTargetSrcD;
+
   maindec md(opD, ResultSrcD, MemWriteD, BranchD,
              ALUSrcD, RegWriteD, JumpD, ImmSrcD, ALUOpD,PCTargetSrcD);
   aludec  ad(opD[5], funct3D, funct7b5D,funct7b0D, ALUOpD, ALUControlD);
-  
+
   floprc #(12) controlregE(clk, reset, FlushE,
                            {RegWriteD, ResultSrcD, MemWriteD, JumpD, BranchD, ALUControlD, ALUSrcD, PCTargetSrcD},
                            {RegWriteE, ResultSrcE, MemWriteE, JumpE, BranchE, ALUControlE, ALUSrcE, PCTargetSrcE});
 
   assign PCSrcE = (BranchE & ZeroE) | JumpE;
   assign ResultSrcEb0 = ResultSrcE[0];
-  
-  
+  assign ResultSrcMb1 = ResultSrcM[1];
+
+
   flopr #(4) controlregM(clk, reset,
                          {RegWriteE, ResultSrcE, MemWriteE},
                          {RegWriteM, ResultSrcM, MemWriteM});
-  
-  
+
+
   flopr #(3) controlregW(clk, reset,
                          {RegWriteM, ResultSrcM},
-                         {RegWriteW, ResultSrcW});     
+                         {RegWriteW, ResultSrcW});
 endmodule
 
 module maindec(input   [6:0] op,
@@ -128,7 +131,7 @@ module maindec(input   [6:0] op,
     // RegWrite_ImmSrc_ALUSrc_MemWrite_ResultSrc_Branch_ALUOp_Jump_PCTargetSrc
       7'b0000011: controls = 13'b1_000_1_0_01_0_00_0_0; // lw
       7'b0100011: controls = 13'b0_001_1_1_00_0_00_0_0; // sw
-      7'b0110011: controls = 13'b1_xxx_0_0_00_0_10_0_0; // R-type 
+      7'b0110011: controls = 13'b1_xxx_0_0_00_0_10_0_0; // R-type
       7'b1100011: controls = 13'b0_010_0_0_00_1_01_0_0; // B-type
       7'b0010011: controls = 13'b1_000_1_0_00_0_10_0_0; // I-type ALU
       7'b1101111: controls = 13'b1_011_0_0_10_0_00_1_0; // jal
@@ -155,11 +158,11 @@ module aludec(input         opb5,
       2'b00:                ALUControl = 4'b0000; // addition
       2'b01:                ALUControl = 4'b0001; // subtraction
       default: case(funct3) // R-type or I-type ALU
-                 3'b000:  if (RtypeSub) 
+                 3'b000:  if (RtypeSub)
                             ALUControl = 4'b0001; // sub
         				  else if(RtypeExt)
                             ALUControl = 4'b1000; // mul-NEW
-                          else          
+                          else
                             ALUControl = 4'b0000; // add, addi
                  3'b010:    ALUControl = 4'b0101; // slt, slti
 					  3'b100:	 if(RtypeExt)
@@ -168,7 +171,7 @@ module aludec(input         opb5,
 										ALUControl = 4'b1011; //xor-NEW
         		     3'b110:  if(RtypeExt)
                    			 ALUControl = 4'b1010; //rem-NEW
-								  else                   			
+								  else
                			 	 ALUControl = 4'b0011; // or, ori
                  3'b111:    ALUControl = 4'b0010; // and, andi
                  default:   ALUControl = 4'bxxxx; // ???
@@ -184,7 +187,7 @@ module datapath(input  clk, reset,
                 input   [31:0] InstrF,
                 // Decode stage signals
                 output  [6:0]  opD,
-                output  [2:0]	 funct3D, 
+                output  [2:0]	 funct3D,
                 output         funct7b5D,
 					 output			 funct7b0D,
                 input          StallD, FlushD,
@@ -199,13 +202,14 @@ module datapath(input  clk, reset,
                 output         ZeroE,
 					 output [2:0] funct3E,
                 // Memory stage signals
-                input          MemWriteM, 
+                input          MemWriteM,
                 output  [31:0] WriteDataM, ALUResultM,
                 input   [31:0] ReadDataM,
                 // Writeback stage signals
-                input          RegWriteW, 
+                input          RegWriteW,
                 input   [1:0]  ResultSrcW,
-                // Hazard Unit signals 
+                input          ResultSrcMb1,
+                // Hazard Unit signals
                 output  [4:0]  Rs1D, Rs2D, Rs1E, Rs2E,
                 output  [4:0]  RdE, RdM, RdW);
 
@@ -229,6 +233,7 @@ module datapath(input  clk, reset,
   // Memory stage signals
   wire [31:0] PCPlus4M;
   wire [31:0] PCTargetM;
+  wire [31:0] ForwardResultM; 
   // Writeback stage signals
   wire [31:0] ALUResultW;
   wire [31:0] ReadDataW;
@@ -240,9 +245,9 @@ module datapath(input  clk, reset,
   mux2    #(32) pcmux(PCPlus4F, PCFinalTargetE, PCSrcE, PCNextF);
   flopenr #(32) pcreg(clk, reset, ~StallF, PCNextF, PCF);
   adder         pcadd(PCF, 32'h4, PCPlus4F);
-  
+
   // Decode stage pipeline register and logic
-  flopenrc #(96) regD(clk, reset, FlushD, ~StallD, 
+  flopenrc #(96) regD(clk, reset, FlushD, ~StallD,
                       {InstrF, PCF, PCPlus4F},
                       {InstrD, PCD, PCPlus4D});
   assign opD       = InstrD[6:0];
@@ -252,39 +257,45 @@ module datapath(input  clk, reset,
   assign Rs1D      = InstrD[19:15];
   assign Rs2D      = InstrD[24:20];
   assign RdD       = InstrD[11:7];
-	
+
   regfile        rf(clk, RegWriteW, Rs1D, Rs2D, RdW, ResultW, RD1D, RD2D);
   extend         ext(InstrD[31:7], ImmSrcD, ImmExtD);
- 
-  floprc #(178) regE(clk, reset, FlushE, 
-                     {RD1D, RD2D, PCD, Rs1D, Rs2D, RdD, ImmExtD, PCPlus4D,funct3D}, 
+
+  floprc #(178) regE(clk, reset, FlushE,
+                     {RD1D, RD2D, PCD, Rs1D, Rs2D, RdD, ImmExtD, PCPlus4D,funct3D},
                      {RD1E, RD2E, PCE, Rs1E, Rs2E, RdE, ImmExtE, PCPlus4E,funct3E});
-	
-  mux3   #(32)  faemux(RD1E, ResultW, ALUResultM, ForwardAE, SrcAE);
-  mux3   #(32)  fbemux(RD2E, ResultW, ALUResultM, ForwardBE, WriteDataE);
-  mux2   #(32)  pctargetmux(PCTargetE, ALUResultE, PCTargetSrcE,PCFinalTargetE); 
+
+  mux3   #(32)  faemux(RD1E, ResultW, ForwardResultM, ForwardAE, SrcAE);
+  mux3   #(32)  fbemux(RD2E, ResultW, ForwardResultM, ForwardBE, WriteDataE);
+  mux2   #(32)  pctargetmux(PCTargetE, (ALUResultE & ~32'b1), PCTargetSrcE,PCFinalTargetE);
   mux2   #(32)  srcbmux(WriteDataE, ImmExtE, ALUSrcE, SrcBE);
   alu           alu(SrcAE, SrcBE, ALUControlE,funct3E, ALUResultE, ZeroE);
   adder         branchadd(ImmExtE, PCE, PCTargetE);
 
-  flopr  #(133) regM(clk, reset, 
+  flopr  #(133) regM(clk, reset,
                      {ALUResultE, WriteDataE, RdE,PCTargetE, PCPlus4E},
                      {ALUResultM, WriteDataM, RdM,PCTargetM, PCPlus4M});
-	
-  flopr  #(133) regW(clk, reset, 
+
+  // YENI: MEM stage'den forward edilecek "gercek" deger. ResultSrcM[1]=1 olan
+  // tek olasilik jal/jalr (ResultSrc=10) -- bu yuzden PCPlus4M secilmeli, aksi
+  // halde (lw ve auipc zaten hazard unit'teki stall sayesinde bu yoldan hic
+  // gecmiyor) ALUResultM dogru deger.
+  assign ForwardResultM = ResultSrcMb1 ? PCPlus4M : ALUResultM;
+
+  flopr  #(133) regW(clk, reset,
                      {ALUResultM, ReadDataM, RdM,PCTargetM, PCPlus4M},
                      {ALUResultW, ReadDataW, RdW,PCTargetW, PCPlus4W});
-  mux4   #(32)  resultmux(ALUResultW, ReadDataW, PCPlus4W, PCTargetW, ResultSrcW, ResultW);	
+  mux4   #(32)  resultmux(ALUResultW, ReadDataW, PCPlus4W, PCTargetW, ResultSrcW, ResultW);
 endmodule
 
 module hazard(input   [4:0] Rs1D, Rs2D, Rs1E, Rs2E, RdE, RdM, RdW,
-              input         PCSrcE, ResultSrcEb0, 
+              input         PCSrcE, ResultSrcEb0,
               input         RegWriteM, RegWriteW,
               output  reg [1:0] ForwardAE, ForwardBE,
               output        StallF, StallD, FlushD, FlushE);
 
   wire lwStallD;
-  
+
   // forwarding logic
   always @* begin
     ForwardAE = 2'b00;
@@ -292,24 +303,24 @@ module hazard(input   [4:0] Rs1D, Rs2D, Rs1E, Rs2E, RdE, RdM, RdW,
     if (Rs1E != 5'b0)
       if      ((Rs1E == RdM) & RegWriteM) ForwardAE = 2'b10;
       else if ((Rs1E == RdW) & RegWriteW) ForwardAE = 2'b01;
- 
+
     if (Rs2E != 5'b0)
       if      ((Rs2E == RdM) & RegWriteM) ForwardBE = 2'b10;
       else if ((Rs2E == RdW) & RegWriteW) ForwardBE = 2'b01;
   end
-  
+
   // stalls and flushes
-  assign lwStallD = ResultSrcEb0 & ((Rs1D == RdE) | (Rs2D == RdE));  
+  assign lwStallD = ResultSrcEb0 & ((Rs1D == RdE) | (Rs2D == RdE));
   assign StallD = lwStallD;
   assign StallF = lwStallD;
   assign FlushD = PCSrcE;
   assign FlushE = lwStallD | PCSrcE;
 endmodule
 
-module regfile(input          clk, 
-               input          we3, 
-               input   [4:0] a1, a2, a3, 
-               input   [31:0] wd3, 
+module regfile(input          clk,
+               input          we3,
+               input   [4:0] a1, a2, a3,
+               input   [31:0] wd3,
                output  [31:0] rd1, rd2);
 
   reg [31:0] rf[31:0];
@@ -317,7 +328,7 @@ module regfile(input          clk,
 
 
   always @(negedge clk)
-    if (we3) rf[a3] <= wd3;	
+    if (we3) rf[a3] <= wd3;
 
   assign rd1 = (a1 != 0) ? rf[a1] : 0;
   assign rd2 = (a2 != 0) ? rf[a2] : 0;
@@ -332,26 +343,26 @@ endmodule
 module extend(input   [31:7] instr,
               input   [2:0]  immsrc,
               output  reg [31:0] immext);
- 
+
   always @*
-    case(immsrc) 
-               // I-type 
-      3'b000:   immext = {{20{instr[31]}}, instr[31:20]};  
+    case(immsrc)
+               // I-type
+      3'b000:   immext = {{20{instr[31]}}, instr[31:20]};
                // S-type (stores)
-      3'b001:   immext = {{20{instr[31]}}, instr[31:25], instr[11:7]}; 
+      3'b001:   immext = {{20{instr[31]}}, instr[31:25], instr[11:7]};
                // B-type (branches)
-      3'b010:   immext = {{20{instr[31]}}, instr[7], instr[30:25], instr[11:8], 1'b0}; 
+      3'b010:   immext = {{20{instr[31]}}, instr[7], instr[30:25], instr[11:8], 1'b0};
                // J-type (jal)
-      3'b011:   immext = {{12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0}; 
+      3'b011:   immext = {{12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0};
 					// U-type (auipc)-NEW
 		3'b100:	 immext = {instr[31:12],{12{1'b0}}};
 		default: immext = 32'bx; // undefined
-    endcase             
+    endcase
 endmodule
 
 module flopr #(parameter WIDTH = 8)
               (input               clk, reset,
-               input   [WIDTH-1:0] d, 
+               input   [WIDTH-1:0] d,
                output  reg [WIDTH-1:0] q);
 
   always @(posedge clk, posedge reset)
@@ -361,7 +372,7 @@ endmodule
 
 module flopenr #(parameter WIDTH = 8)
                 (input               clk, reset, en,
-                 input   [WIDTH-1:0] d, 
+                 input   [WIDTH-1:0] d,
                  output  reg [WIDTH-1:0] q);
 
   always @(posedge clk, posedge reset)
@@ -371,12 +382,12 @@ endmodule
 
 module flopenrc #(parameter WIDTH = 8)
                 (input               clk, reset, clear, en,
-                 input   [WIDTH-1:0] d, 
+                 input   [WIDTH-1:0] d,
                  output  reg [WIDTH-1:0] q);
 
   always @(posedge clk, posedge reset)
     if (reset)   q <= 0;
-    else if (en) 
+    else if (en)
       if (clear) q <= 0;
       else       q <= d;
 endmodule
@@ -385,36 +396,36 @@ module floprc #(parameter WIDTH = 8)
               (input   clk,
                input   reset,
                input   clear,
-               input   [WIDTH-1:0] d, 
+               input   [WIDTH-1:0] d,
                output  reg [WIDTH-1:0] q);
 
   always @(posedge clk, posedge reset)
     if (reset) q <= 0;
-    else       
+    else
       if (clear) q <= 0;
       else       q <= d;
 endmodule
 
 module mux2 #(parameter WIDTH = 8)
-             (input   [WIDTH-1:0] d0, d1, 
-              input               s, 
+             (input   [WIDTH-1:0] d0, d1,
+              input               s,
               output  [WIDTH-1:0] y);
 
-  assign y = s ? d1 : d0; 
+  assign y = s ? d1 : d0;
 endmodule
 module mux3 #(parameter WIDTH = 8)
              (input   [WIDTH-1:0] d0, d1, d2,
-              input   [1:0]       s, 
+              input   [1:0]       s,
               output  [WIDTH-1:0] y);
 
-  assign y = s[1] ? d2 : (s[0] ? d1 : d0); 
+  assign y = s[1] ? d2 : (s[0] ? d1 : d0);
 endmodule
 module mux4 #(parameter WIDTH = 8)
              (input   [WIDTH-1:0] d0, d1, d2,d3,
-              input   [1:0]       s, 
+              input   [1:0]       s,
               output  [WIDTH-1:0] y);
 
-  assign y = s[1] ? (s[0] ? d3 : d2) : (s[0] ? d1 : d0); 
+  assign y = s[1] ? (s[0] ? d3 : d2) : (s[0] ? d1 : d0);
 endmodule
 
 module imem(input   [31:0] a,
@@ -436,7 +447,7 @@ module imem(input   [31:0] a,
     RAM[10] = 32'hfec42503;  //      40: lw a0, -20(s0)  // lw x10, -20(x8)
     RAM[11] = 32'h020000ef;  //      44: call gcd        // jal x1, 32
     RAM[12] = 32'h00050793;  //      48: mv a5, a0       // addi x15, x10, 0
-    RAM[13] = 32'h00000013;  //      52: nop             // addi x0, x0, 0 
+    RAM[13] = 32'h00000013;  //      52: nop             // addi x0, x0, 0
     RAM[14] = 32'h00078513;  //      56: mv a0, a5       // addi x10, x15, 0
     RAM[15] = 32'h01c12083;  //      60: lw ra, 28(sp)   // lw x1, 28(x2)
     RAM[16] = 32'h01812403;  //      64: lw s0, 24(sp)   // lw x8, 24(x2)
@@ -499,16 +510,21 @@ module alu(input   [31:0] a, b,
            input   [3:0]  alucontrol,
 			  input [2:0] funct3,
            output  reg [31:0] result,
-           output         zero);
+           output  reg    zero);
 
   wire [31:0] condinvb, sum;
   wire        v;              // overflow
   wire        isAddSub;       // true when is add or subtract operation
+  wire        ltSigned, ltUnsigned;
 
   assign condinvb = alucontrol[0] ? ~b : b;
   assign sum = a + condinvb + alucontrol[0];
   assign isAddSub = ~alucontrol[2] & ~alucontrol[1] |
                     ~alucontrol[1] &  alucontrol[0];
+  assign v = (~(alucontrol[0] ^ a[31] ^ b[31]) & (a[31] ^ sum[31]) & isAddSub);
+
+  assign ltSigned   = sum[31] ^ v;   // signed less-than
+  assign ltUnsigned = (a < b);       // unsigned less-than
 
   always @*
     case (alucontrol)
@@ -517,18 +533,25 @@ module alu(input   [31:0] a, b,
       4'b0010:  result = a & b;       // and
       4'b0011:  result = a | b;       // or
       4'b0100:  result = a ^ b;       // xor
-      4'b0101:  result = sum[31] ^ v; // slt
+      4'b0101:  result = {31'b0, ltSigned}; // slt
       4'b0110:  result = a << b[4:0]; // sll
       4'b0111:  result = a >> b[4:0]; // srl
 	   4'b1000: result = a * b;		  //mul-NEW
-      4'b1001: result = a / b;		  //div-NEW
+      4'b1001: result = b == 0 ? 32'hFFFFFFFF : a / b; //div-NEW
       4'b1010: result = b == 0 ? a : a % b; //rem-NEW
 		4'b1011: result = a ^ b;		  //xor-NEW
       default: result = 32'bx;
     endcase
 
-  assign zero = funct3[0] == 0 ? funct3[2] == 0 ? (result == 32'b0) : (result[31] == 1'b1 && !v) : funct3[2] == 0 ? (result != 32'b0) : (result[31]  != 1'b1 && result >= 32'b0 && !v) ;
-  assign v = (~(alucontrol[0] ^ a[31] ^ b[31]) & (a[31] ^ sum[31]) & isAddSub);// | (alucontrol[0] ^ alucontrol[1] ^ alucontrol[2] ^ a[31] ^ b[31]) & (a[31] ^ sum; // Overflow logic added for: Mul,Div,Rem
-  
-endmodule
+  always @*
+    case (funct3)
+      3'b000:  zero = (a == b);     // beq
+      3'b001:  zero = (a != b);     // bne
+      3'b100:  zero = ltSigned;     // blt
+      3'b101:  zero = ~ltSigned;    // bge
+      3'b110:  zero = ltUnsigned;   // bltu
+      3'b111:  zero = ~ltUnsigned;  // bgeu
+      default: zero = 1'b0;
+    endcase
 
+endmodule
